@@ -24,10 +24,10 @@ public class RaftNode implements MessageHandling {
     private boolean isLeader;
     private int currentVotes;
 
-    private static Timer electionTimer;
-    private static int electionTimeout;
-    private static Timer heartbeatTimer;
-    private static int heartbeatTimeout;
+    private Timer electionTimer;
+    private int electionTimeout;
+    private Timer heartbeatTimer;
+    private int heartbeatTimeout;
 
     public RaftNode(int port, int id, int num_peers) {
         this.id = id;
@@ -130,10 +130,19 @@ public class RaftNode implements MessageHandling {
  
     // This does synchronized work when an Append Entry Request is sent
     public synchronized boolean updateLogs(AppendEntriesArgs arguments) {
-		boolean check = true;
+		boolean check = arguments.term >= currentTerm;
+		
+		//System.out.println("HBR: " + arguments.leaderId + " to " + id);
 		
 		if (check) {
-			electionTimer.cancel();
+			if (isLeader) {
+				isLeader = false;
+				heartbeatTimer.cancel();
+				
+				//System.out.println("CANCELLING BEING LEADER: " + arguments.leaderId + " to " + id);
+			} else {
+				electionTimer.cancel();
+			}
 			startElectionTimer(new ElectionTask());
 			
 			return true;
@@ -170,10 +179,10 @@ public class RaftNode implements MessageHandling {
 					+ " | Granted");
 			votedFor = arguments.candidateId;
 			currentTerm = arguments.term;
-			isLeader = false;
 			
 			if (isLeader) {
 				isLeader = false;
+				heartbeatTimer.cancel();
 			} else {
 				electionTimer.cancel();
 			}
@@ -200,6 +209,7 @@ public class RaftNode implements MessageHandling {
 			if (currentVotes >= num_peers / 2 + 1) {
 				isLeader = true;
 				electionTimer.cancel();
+				startHeartbeatTimer(new HeartbeatTask(), true);
 				
 				return true;
 			}
@@ -246,8 +256,6 @@ public class RaftNode implements MessageHandling {
 		    		
 		    		if (becomeLeader(reply)) {
 	    				System.out.println("I AM LEADER pepeJAM id: " + id);
-	    				
-	    				startHeartbeatTimer(new HeartbeatTask(), true);
 		    		}
 		    	} else if (message.getType() == MessageType.AppendEntriesReply) {
 		    		AppendEntriesReply reply = (AppendEntriesReply) byteToObj(message.getBody());
@@ -263,14 +271,22 @@ public class RaftNode implements MessageHandling {
 	}
     
     // This starts the election timer
-    public static void startElectionTimer(ElectionTask task) {
+    public void startElectionTimer(ElectionTask task) {
+    	if (isLeader) {
+    		return;
+    	}
+    	
     	electionTimeout = (int) (Math.random() * 700 + 300);
     	electionTimer = new Timer();
     	electionTimer.schedule(task, electionTimeout);
     }
     
     // This starts the heartbeat timer with the option to send a heartbeat right away
-    public static void startHeartbeatTimer(HeartbeatTask task, boolean doItNow) {
+    public void startHeartbeatTimer(HeartbeatTask task, boolean doItNow) {
+    	if (!isLeader) {
+    		return;
+    	}
+    	
     	heartbeatTimeout = 150;
     	heartbeatTimer = new Timer();
     	if (doItNow) {
@@ -337,6 +353,6 @@ public class RaftNode implements MessageHandling {
         if (args.length != 3) throw new Exception("Need 2 args: <port> <id> <num_peers>");
         RaftNode UN = new RaftNode(Integer.parseInt(args[0]), Integer.parseInt(args[1]), Integer.parseInt(args[2]));
         
-        startElectionTimer(UN.new ElectionTask());
+        UN.startElectionTimer(UN.new ElectionTask());
     }
 }
