@@ -149,8 +149,14 @@ public class RaftNode implements MessageHandling {
 		boolean termCheck = (arguments.term == currentTerm && voteCheck)
 							|| arguments.term > currentTerm;
 		
-		int lastLogIndex = log.size() - 1;
-		int lastLogTerm = (log.get(lastLogIndex)).term;
+		
+		int lastLogIndex = 0;
+		int lastLogTerm = 0;
+		if (log.size() != 0) {
+			lastLogIndex = log.size() - 1;
+			lastLogTerm = (log.get(lastLogIndex)).term;
+		}
+		
 		boolean logCheck = (lastLogTerm < arguments.lastLogTerm 
 							|| (lastLogTerm == arguments.lastLogTerm && lastLogIndex <= arguments.lastLogIndex));
 		
@@ -273,8 +279,12 @@ public class RaftNode implements MessageHandling {
             
         	ArrayList<LogEntry> empty = new ArrayList<LogEntry>();
 			try {
-				int lastLogIndex = log.size() - 1;
-				int lastLogTerm = (log.get(lastLogIndex)).term;
+				int lastLogIndex = 0;
+				int lastLogTerm = 0;
+				if (log.size() != 0) {
+					lastLogIndex = log.size() - 1;
+					lastLogTerm = (log.get(lastLogIndex)).term;
+				}
 				
 				byte[] body = objToByte(new AppendEntriesArgs(currentTerm, id, lastLogIndex, lastLogTerm, empty, commitIndex));
 				sendMessageAll(MessageType.AppendEntriesArgs, body);
@@ -299,8 +309,12 @@ public class RaftNode implements MessageHandling {
         	startElectionTimer(new ElectionTask());
             
 			try {
-				int lastLogIndex = log.size() - 1;
-				int lastLogTerm = (log.get(lastLogIndex)).term;
+				int lastLogIndex = 0;
+				int lastLogTerm = 0;
+				if (log.size() != 0) {
+					lastLogIndex = log.size() - 1;
+					lastLogTerm = (log.get(lastLogIndex)).term;
+				}
 				
 				byte[] body = objToByte(new RequestVoteArgs(currentTerm, id, lastLogIndex, lastLogTerm));
 				sendMessageAll(MessageType.RequestVoteArgs, body);
