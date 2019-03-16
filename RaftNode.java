@@ -2,6 +2,7 @@ import lib.*;
 
 import java.io.*;
 import java.rmi.RemoteException;
+import java.util.ArrayList;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -11,18 +12,22 @@ public class RaftNode implements MessageHandling {
     private int num_peers;
     
     private int currentTerm;
-    private boolean isLeader;
     private Integer votedFor;
+    private ArrayList<LogEntry> log;
+
+    private int commitIndex;
+    private int lastApplied;
+    
+    private ArrayList<Integer> nextIndex;
+    private ArrayList<Integer> matchIndex;
+
+    private boolean isLeader;
     private int currentVotes;
 
     private static Timer electionTimer;
     private static int electionTimeout;
     private static Timer heartbeatTimer;
     private static int heartbeatTimeout;
-    
-    private int lastLogIndex;
-    private int lastLogTerm;
-    private int commitIndex;
 
     public RaftNode(int port, int id, int num_peers) {
         this.id = id;
@@ -30,18 +35,29 @@ public class RaftNode implements MessageHandling {
         lib = new TransportLib(port, id, this);
         
         currentTerm = 0;
-        isLeader = false;
         votedFor = null;
+        log = new ArrayList<LogEntry>();
+        
+        commitIndex = 0;
+        lastApplied = 0;
+        
+        nextIndex = new ArrayList<Integer>();
+        for (int i = 0; i < num_peers; i++) {
+        	nextIndex.add(1);
+        }
+        
+        matchIndex = new ArrayList<Integer>();
+        for (int i = 0; i < num_peers; i++) {
+        	nextIndex.add(0);
+        }
+
+        isLeader = false;
         currentVotes = 0;
         
         electionTimer = null;
         electionTimeout = 0;
         heartbeatTimer = null;
         heartbeatTimeout = 0;
-        
-        lastLogIndex = 0;
-        lastLogTerm = 0;
-        commitIndex = 0;
     }
     
     public byte[] objToByte(Object object) throws IOException {
@@ -127,6 +143,9 @@ public class RaftNode implements MessageHandling {
 		boolean voteCheck = votedFor == null || votedFor == arguments.candidateId;
 		boolean termCheck = (arguments.term == currentTerm && voteCheck)
 							|| arguments.term > currentTerm;
+		
+		int lastLogIndex = log.size() - 1;
+		int lastLogTerm = (log.get(lastLogIndex)).term;
 		boolean logCheck = (lastLogTerm < arguments.lastLogTerm 
 							|| (lastLogTerm == arguments.lastLogTerm && lastLogIndex <= arguments.lastLogIndex));
 		
@@ -238,10 +257,12 @@ public class RaftNode implements MessageHandling {
         public void run() {
         	startHeartbeatTimer(new HeartbeatTask(), false);
             
-            byte[] body;
-            int[] empty = new int[0];
+        	ArrayList<LogEntry> empty = new ArrayList<LogEntry>();
 			try {
-				body = objToByte(new AppendEntriesArgs(currentTerm, id, lastLogIndex, lastLogTerm, empty, commitIndex));
+				int lastLogIndex = log.size() - 1;
+				int lastLogTerm = (log.get(lastLogIndex)).term;
+				
+				byte[] body = objToByte(new AppendEntriesArgs(currentTerm, id, lastLogIndex, lastLogTerm, empty, commitIndex));
 				sendMessageAll(MessageType.AppendEntriesArgs, body);
 			} catch (IOException e) {
 				e.printStackTrace();
@@ -262,9 +283,11 @@ public class RaftNode implements MessageHandling {
         	
         	startElectionTimer(new ElectionTask());
             
-            byte[] body;
 			try {
-				body = objToByte(new RequestVoteArgs(currentTerm, id, lastLogIndex, lastLogTerm));
+				int lastLogIndex = log.size() - 1;
+				int lastLogTerm = (log.get(lastLogIndex)).term;
+				
+				byte[] body = objToByte(new RequestVoteArgs(currentTerm, id, lastLogIndex, lastLogTerm));
 				sendMessageAll(MessageType.RequestVoteArgs, body);
 			} catch (IOException e) {
 				e.printStackTrace();

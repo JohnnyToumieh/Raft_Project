@@ -1,6 +1,7 @@
 package lib;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 
 /**
  * This class is a wrapper for packing all the arguments that you might use in
@@ -13,11 +14,11 @@ public class AppendEntriesArgs implements Serializable {
 	public int leaderId;
 	public int prevLogIndex;
 	public int prevLogTerm;
-	public int entries[];
+	public ArrayList<LogEntry> entries;
 	public int leaderCommit;
 	
     public AppendEntriesArgs(int term, int leaderId, int prevLogIndex, int prevLogTerm,
-    							int[] entries, int leaderCommit) {
+    							ArrayList<LogEntry> entries, int leaderCommit) {
     	this.term = term;
     	this.leaderId = leaderId;
     	this.prevLogIndex = prevLogIndex;
