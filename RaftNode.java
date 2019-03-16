@@ -15,11 +15,14 @@ public class RaftNode implements MessageHandling {
     private Integer votedFor;
     private int currentVotes;
 
-    private static Timer timer;
+    private static Timer electionTimer;
     private static int electionTimeout;
+    private static Timer heartbeatTimer;
+    private static int heartbeatTimeout;
     
     private int lastLogIndex;
     private int lastLogTerm;
+    private int commitIndex;
 
     public RaftNode(int port, int id, int num_peers) {
         this.id = id;
@@ -31,11 +34,14 @@ public class RaftNode implements MessageHandling {
         votedFor = null;
         currentVotes = 0;
         
-        timer = null;
+        electionTimer = null;
         electionTimeout = 0;
+        heartbeatTimer = null;
+        heartbeatTimeout = 0;
         
         lastLogIndex = 0;
         lastLogTerm = 0;
+        commitIndex = 0;
     }
     
     public byte[] objToByte(Object object) throws IOException {
@@ -77,43 +83,19 @@ public class RaftNode implements MessageHandling {
     	
 		Message response = null;
 		boolean voteGranted = false;
+		boolean success = false;
     	
 		try {
 	    	if (message.getType() == MessageType.RequestVoteArgs) {
-	    		RequestVoteArgs arguments = (RequestVoteArgs) byteToObj(message.getBody());
+	    		voteGranted = getVote((RequestVoteArgs) byteToObj(message.getBody()));
 	    		
-	    		System.out.println("Message from: " + arguments.candidateId 
-						+ " | Message to: " + id 
-						+ " | Term: " + arguments.term);
-	    		
-	    		boolean voteCheck = votedFor == null || votedFor == arguments.candidateId;
-	    		boolean termCheck = (arguments.term == currentTerm && voteCheck)
-	    							|| arguments.term > currentTerm;
-	    		boolean logCheck = (lastLogTerm < arguments.lastLogTerm 
-									|| (lastLogTerm == arguments.lastLogTerm && lastLogIndex <= arguments.lastLogIndex));
-	    		
-	    		if (termCheck && logCheck) {
-	    			System.out.println("Message from: " + arguments.candidateId 
-							+ " | Message to: " + id 
-							+ " | Term: " + arguments.term
-							+ " | Granted");
-	    			
-	    			voteGranted = true;
-
-	    			votedFor = arguments.candidateId;
-	    			currentTerm = arguments.term;
-	    			
-	    			timer.cancel();
-	    			startTimer(new Task());
-	    		} else {
-	    			System.out.println("Message from: " + arguments.candidateId 
-							+ " | Message to: " + id 
-							+ " | Term: " + arguments.term
-							+ " | NOT Granted");
-	    		}
-	    		
-	    		byte[] body = objToByte(new RequestVoteReply(arguments.term, voteGranted));
+	    		byte[] body = objToByte(new RequestVoteReply(currentTerm, voteGranted));
 	            response = new Message(MessageType.RequestVoteReply, id, 0, body);
+	    	} else if (message.getType() == MessageType.AppendEntriesArgs) {
+	    		success = updateLogs((AppendEntriesArgs) byteToObj(message.getBody()));
+	    		
+	    		byte[] body = objToByte(new AppendEntriesReply(currentTerm, success));
+	            response = new Message(MessageType.AppendEntriesReply, id, 0, body);
 	    	}
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
@@ -122,6 +104,68 @@ public class RaftNode implements MessageHandling {
 		}
     	
         return response;
+    }
+ 
+    public synchronized boolean updateLogs(AppendEntriesArgs arguments) {
+		boolean check = true;
+		
+		if (check) {
+			electionTimer.cancel();
+			startElectionTimer(new ElectionTask());
+			
+			return true;
+		}
+		
+		return false;
+    }
+    
+    public synchronized boolean getVote(RequestVoteArgs arguments) {
+		System.out.println("Message from: " + arguments.candidateId 
+				+ " | Message to: " + id 
+				+ " | Term: " + arguments.term);
+		
+		boolean voteCheck = votedFor == null || votedFor == arguments.candidateId;
+		boolean termCheck = (arguments.term == currentTerm && voteCheck)
+							|| arguments.term > currentTerm;
+		boolean logCheck = (lastLogTerm < arguments.lastLogTerm 
+							|| (lastLogTerm == arguments.lastLogTerm && lastLogIndex <= arguments.lastLogIndex));
+		
+		if (termCheck && logCheck) {
+			System.out.println("Message from: " + arguments.candidateId 
+					+ " | Message to: " + id 
+					+ " | Term: " + arguments.term
+					+ " | Granted");
+			votedFor = arguments.candidateId;
+			currentTerm = arguments.term;
+			
+			electionTimer.cancel();
+			startElectionTimer(new ElectionTask());
+			
+			return true;
+		} else {
+			System.out.println("Message from: " + arguments.candidateId 
+					+ " | Message to: " + id 
+					+ " | Term: " + arguments.term
+					+ " | NOT Granted");
+		}
+		
+		return false;
+    }
+    
+    public synchronized boolean becomeLeader(RequestVoteReply reply) {
+    	if (reply.term == currentTerm && reply.voteGranted) {
+			currentVotes++;
+			
+    		System.out.println("User: " + id + " | Votes: " + currentVotes);
+			
+			if (currentVotes >= num_peers / 2 + 1) {
+				isLeader = true;
+				
+				return true;
+			}
+    	}
+    	
+    	return false;
     }
     
     public void sendMessageAll(MessageType type, byte[] body) {
@@ -146,23 +190,25 @@ public class RaftNode implements MessageHandling {
 
     	public void run() {
     		try {
-			   Message message = lib.sendMessage(new Message(type, id, des_add, body));
+    			Message message = lib.sendMessage(new Message(type, id, des_add, body));
 				
-				if (message != null && message.getType() == MessageType.RequestVoteReply) {
+    			if (message == null) {
+    				return;
+    			}
+			   
+				if (message.getType() == MessageType.RequestVoteReply) {
 		    		RequestVoteReply reply = (RequestVoteReply) byteToObj(message.getBody());
 		    		
-		    		if (reply.term == currentTerm
-		    			&& reply.voteGranted) {
-		    			currentVotes++;
-		    			
-			    		System.out.println("User: " + id + " | Votes: " + currentVotes);
-		    			
-		    			if (currentVotes >= num_peers / 2 + 1) {
-		    				isLeader = true;
-		    				
-		    				System.out.println("I AM LEADER pepeJAM id: " + id);
-		    				// TODO send message to all that im a leader now pepeJAM (using appendentries command)
-		    			}
+		    		if (becomeLeader(reply)) {
+	    				System.out.println("I AM LEADER pepeJAM id: " + id);
+	    				
+	    				startHeartbeatTimer(new HeartbeatTask(), true);
+		    		}
+		    	} else if (message.getType() == MessageType.AppendEntriesReply) {
+		    		AppendEntriesReply reply = (AppendEntriesReply) byteToObj(message.getBody());
+		    		
+		    		if (!reply.success) {
+	    				
 		    		}
 		    	}
 			} catch (ClassNotFoundException | IOException e) {
@@ -171,13 +217,39 @@ public class RaftNode implements MessageHandling {
     	}
 	}
     
-    public static void startTimer(Task task) {
-    	electionTimeout = ((int) Math.random()) * 800 + 100;
-    	timer = new Timer();
-    	timer.schedule(task, electionTimeout);
+    public static void startElectionTimer(ElectionTask task) {
+    	electionTimeout = ((int) Math.random()) * 800 + 300;
+    	electionTimer = new Timer();
+    	electionTimer.schedule(task, electionTimeout);
     }
     
-    public class Task extends TimerTask {
+    public static void startHeartbeatTimer(HeartbeatTask task, boolean doItNow) {
+    	heartbeatTimeout = 150;
+    	heartbeatTimer = new Timer();
+    	if (doItNow) {
+    		heartbeatTimer.schedule(task, 0, heartbeatTimeout);
+    	} else {
+    		heartbeatTimer.schedule(task, heartbeatTimeout);
+    	}
+    }
+
+    public class HeartbeatTask extends TimerTask {
+        @Override
+        public void run() {
+        	startHeartbeatTimer(new HeartbeatTask(), false);
+            
+            byte[] body;
+            int[] empty = new int[0];
+			try {
+				body = objToByte(new AppendEntriesArgs(currentTerm, id, lastLogIndex, lastLogTerm, empty, commitIndex));
+				sendMessageAll(MessageType.AppendEntriesArgs, body);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+        }
+    }
+    
+    public class ElectionTask extends TimerTask {
         @Override
         public void run() {
         	currentTerm++;
@@ -188,7 +260,7 @@ public class RaftNode implements MessageHandling {
 					+ " | ID: " + id 
 					+ " | Term: " + currentTerm);
         	
-        	startTimer(new Task());
+        	startElectionTimer(new ElectionTask());
             
             byte[] body;
 			try {
@@ -206,8 +278,8 @@ public class RaftNode implements MessageHandling {
         //new usernode
         RaftNode UN = new RaftNode(Integer.parseInt(args[0]), Integer.parseInt(args[1]), Integer.parseInt(args[2]));
         
-        startTimer(UN.new Task());
+        startElectionTimer(UN.new ElectionTask());
         
-        // TODO timer should be reset if a leader sends a heartbeat
+        // TODO electionTimer should be reset if a leader sends a heartbeat
     }
 }
