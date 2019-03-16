@@ -86,7 +86,10 @@ public class RaftNode implements MessageHandling {
 
     @Override
     public GetStateReply getState() {
-    	System.out.println("getStateReply called");
+    	System.out.println("getStateReply called" 
+				+ " | User: " + id 
+				+ " | Term: " + currentTerm
+				+ " | isLeader: " + isLeader);
         
     	return new GetStateReply(currentTerm, isLeader);
     }
@@ -167,8 +170,13 @@ public class RaftNode implements MessageHandling {
 					+ " | Granted");
 			votedFor = arguments.candidateId;
 			currentTerm = arguments.term;
+			isLeader = false;
 			
-			electionTimer.cancel();
+			if (isLeader) {
+				isLeader = false;
+			} else {
+				electionTimer.cancel();
+			}
 			startElectionTimer(new ElectionTask());
 			
 			return true;
@@ -191,6 +199,7 @@ public class RaftNode implements MessageHandling {
 			
 			if (currentVotes >= num_peers / 2 + 1) {
 				isLeader = true;
+				electionTimer.cancel();
 				
 				return true;
 			}
