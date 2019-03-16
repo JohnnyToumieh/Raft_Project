@@ -264,7 +264,7 @@ public class RaftNode implements MessageHandling {
     
     // This starts the election timer
     public static void startElectionTimer(ElectionTask task) {
-    	electionTimeout = ((int) Math.random()) * 800 + 300;
+    	electionTimeout = (int) (Math.random() * 700 + 300);
     	electionTimer = new Timer();
     	electionTimer.schedule(task, electionTimeout);
     }
