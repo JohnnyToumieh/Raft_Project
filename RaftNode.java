@@ -101,6 +101,9 @@ public class RaftNode implements MessageHandling {
 		boolean voteGranted = false;
 		boolean success = false;
     	
+		// The node receives either a request for votes message or append entry message
+		// It also needs to return the reply to the sender
+		
 		try {
 	    	if (message.getType() == MessageType.RequestVoteArgs) {
 	    		voteGranted = getVote((RequestVoteArgs) byteToObj(message.getBody()));
@@ -122,6 +125,7 @@ public class RaftNode implements MessageHandling {
         return response;
     }
  
+    // This does synchronized work when an Append Entry Request is sent
     public synchronized boolean updateLogs(AppendEntriesArgs arguments) {
 		boolean check = true;
 		
@@ -135,6 +139,7 @@ public class RaftNode implements MessageHandling {
 		return false;
     }
     
+    // This does synchronized work when an Request Vote Request is sent
     public synchronized boolean getVote(RequestVoteArgs arguments) {
 		System.out.println("Message from: " + arguments.candidateId 
 				+ " | Message to: " + id 
@@ -171,6 +176,7 @@ public class RaftNode implements MessageHandling {
 		return false;
     }
     
+    // This does synchronized work when the response to the Request Vote is received
     public synchronized boolean becomeLeader(RequestVoteReply reply) {
     	if (reply.term == currentTerm && reply.voteGranted) {
 			currentVotes++;
@@ -187,6 +193,8 @@ public class RaftNode implements MessageHandling {
     	return false;
     }
     
+    // This function tries to broadcast a message for all servers
+    // It creates a new thread for each communication because we need to wait for the reply
     public void sendMessageAll(MessageType type, byte[] body) {
 		for (int i = 0; i < num_peers; i++) {
     		if (i != id) {
@@ -196,6 +204,7 @@ public class RaftNode implements MessageHandling {
     	}
     }
     
+    // This is the thread that handles sending messages for a server
     public class MessageSender implements Runnable {
     	private MessageType type;
     	private int des_add;
@@ -215,6 +224,8 @@ public class RaftNode implements MessageHandling {
     				return;
     			}
 			   
+    			// The node receives a reply for his request
+    			
 				if (message.getType() == MessageType.RequestVoteReply) {
 		    		RequestVoteReply reply = (RequestVoteReply) byteToObj(message.getBody());
 		    		
@@ -236,12 +247,14 @@ public class RaftNode implements MessageHandling {
     	}
 	}
     
+    // This starts the election timer
     public static void startElectionTimer(ElectionTask task) {
     	electionTimeout = ((int) Math.random()) * 800 + 300;
     	electionTimer = new Timer();
     	electionTimer.schedule(task, electionTimeout);
     }
     
+    // This starts the heartbeat timer with the option to send a heartbeat right away
     public static void startHeartbeatTimer(HeartbeatTask task, boolean doItNow) {
     	heartbeatTimeout = 150;
     	heartbeatTimer = new Timer();
@@ -252,6 +265,7 @@ public class RaftNode implements MessageHandling {
     	}
     }
 
+    // This is the heartbeat
     public class HeartbeatTask extends TimerTask {
         @Override
         public void run() {
@@ -270,6 +284,7 @@ public class RaftNode implements MessageHandling {
         }
     }
     
+    // This is the election
     public class ElectionTask extends TimerTask {
         @Override
         public void run() {
@@ -295,14 +310,10 @@ public class RaftNode implements MessageHandling {
         }
     }
 
-    //main function
     public static void main(String args[]) throws Exception {
         if (args.length != 3) throw new Exception("Need 2 args: <port> <id> <num_peers>");
-        //new usernode
         RaftNode UN = new RaftNode(Integer.parseInt(args[0]), Integer.parseInt(args[1]), Integer.parseInt(args[2]));
         
         startElectionTimer(UN.new ElectionTask());
-        
-        // TODO electionTimer should be reset if a leader sends a heartbeat
     }
 }
