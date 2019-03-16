@@ -308,7 +308,7 @@ public class RaftNode implements MessageHandling {
         @Override
         public void run() {
         	currentTerm++;
-        	currentVotes = 0;
+        	currentVotes = 1;
         	votedFor = id;
         	
         	System.out.println("LEADER MISSING NOTICED REQUESTING FOR VOTES"
