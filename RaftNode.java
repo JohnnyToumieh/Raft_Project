@@ -57,8 +57,10 @@ public class RaftNode implements MessageHandling {
         currentVotes = 0;
         
         electionTimer = null;
+        electionTask = null;
         electionTimeout = 0;
         heartbeatTimer = null;
+        heartbeatTask = null;
         heartbeatTimeout = 0;
     }
     
@@ -82,8 +84,35 @@ public class RaftNode implements MessageHandling {
      */
     @Override
     public StartReply start(int command) {
-    	System.out.println("StartReply called");
-        return null;
+    	System.out.println("StartReply called"
+    			+ " | User: " + id 
+				+ " | Term: " + currentTerm
+				+ " | isLeader: " + isLeader);
+    	
+    	if (isLeader) {
+    		ArrayList<LogEntry> entryToAppend = new ArrayList<LogEntry>();
+    		entryToAppend.add(new LogEntry(currentTerm, command));
+    		
+			try {
+				int lastLogIndex = 0;
+				int lastLogTerm = 0;
+				if (log.size() != 0) {
+					lastLogIndex = log.size() - 1;
+					lastLogTerm = (log.get(lastLogIndex)).term;
+				}
+				
+	    		log.add(new LogEntry(currentTerm, command));
+				
+				byte[] body = objToByte(new AppendEntriesArgs(currentTerm, id, lastLogIndex, lastLogTerm, entryToAppend, commitIndex));
+				sendMessageAll(MessageType.AppendEntriesArgs, body);
+				
+				return new StartReply(lastLogIndex, currentTerm, isLeader);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+    	}
+    	
+        return new StartReply(0, 0, isLeader);
     }
 
     @Override
@@ -144,11 +173,27 @@ public class RaftNode implements MessageHandling {
  
     // This does synchronized work when an Append Entry Request is sent
     public synchronized boolean updateLogs(AppendEntriesArgs arguments) {
-		boolean check = arguments.term >= currentTerm;
+		boolean termCheck = arguments.term >= currentTerm;
+		boolean prevLogCheck = log.size() > arguments.prevLogIndex 
+								&& log.get(arguments.prevLogIndex).term == arguments.prevLogTerm;
+		boolean currentLogCheck = log.size() == arguments.prevLogIndex + 1
+									|| (log.size() > arguments.prevLogIndex + 1 
+											&& log.get(arguments.prevLogIndex + 1 ).term == arguments.entries.get(0).term);
+		
+		if (!currentLogCheck) {
+			log.subList(arguments.prevLogIndex + 1, log.size()).clear();
+		}
+		if (!prevLogCheck) {
+			log.remove(arguments.prevLogIndex);
+		}
 		
 		//System.out.println("HBR: " + arguments.leaderId + " to " + id);
 		
-		if (check) {
+		// TODO fix the check
+		// TODO check if the logs to append is empty, if it's not, append them and reply
+		// TODO at the reply, check if majority replied to commit
+		
+		if (termCheck && prevLogCheck && currentLogCheck) {
 			if (isLeader) {
 				isLeader = false;
 				
